@@ -1,11 +1,20 @@
 package com.ctoboost.whoop.dataloader;
 
+        import com.datastax.driver.core.*;
+
+        import com.datastax.driver.dse.DseCluster;
+        import com.datastax.driver.dse.DseSession;
         import org.apache.commons.cli.*;
+        import org.apache.commons.lang.RandomStringUtils;
+
 
         import java.sql.Timestamp;
-        import java.util.Date;
+
+
+        import java.util.ArrayList;
+        import java.util.Arrays;
+        import java.util.Calendar;
         import java.util.List;
-        import java.util.Properties;
         import java.util.concurrent.*;
         import java.util.concurrent.atomic.AtomicInteger;
 
@@ -22,13 +31,17 @@ public class App
     static int THREAD_COUNT = 10;
     static int PERIOD = 14; //days
     static int FREQUENCY = 60 * 10; // seconds
+    static String HOSTS = "";
 
-    static int intervalToReportStatus = 1000 * 60; //1 minute
-    static int totalCount;
+    static int intervalToReportStatus = 1000 * 10; //1 minute
+    static int totalCount = 0;
 
     public static void main(String[] args) {
 
+
         AtomicInteger recordSentCounts = new AtomicInteger(0);
+
+
 
         // create Options object
         Option rowOption  = OptionBuilder.withArgName( "rows=value" )
@@ -67,13 +80,21 @@ public class App
                 .withDescription( "use value for how often to load data, unit is second, default is 600" )
                 .create( "F" );
 
+        Option hostOption  = OptionBuilder.withArgName( "hosts=value" )
+                .hasArgs(2)
+                .withValueSeparator()
+                .withDescription( "use value for hosts,  delimited by ," )
+                .create( "H" );
+
         Options options = new Options();
         // add t option
         options.addOption(rowOption);
         options.addOption(userOption);
+        options.addOption(threadOption);
         options.addOption(userStartOption);
         options.addOption(periodOption);
         options.addOption(freqencyOption);
+        options.addOption(hostOption);
 
         try {
             CommandLineParser parser = new DefaultParser();
@@ -91,7 +112,7 @@ public class App
             }
 
             if (cmd.hasOption("T")){
-                USER_TO_START = Integer.parseInt(cmd.getOptionProperties("T").getProperty("thread"));
+                THREAD_COUNT = Integer.parseInt(cmd.getOptionProperties("T").getProperty("thread"));
             }
 
             if (cmd.hasOption("P")){
@@ -101,10 +122,22 @@ public class App
             if (cmd.hasOption("F")){
                 FREQUENCY = Integer.parseInt(cmd.getOptionProperties("F").getProperty("seconds"));
             }
+
+            if (cmd.hasOption("H")){
+                HOSTS = cmd.getOptionProperties("H").getProperty("hosts");
+            }
         }
         catch(Exception ex){
-
+            System.out.println("Exception " + ex.getMessage());
         }
+
+
+        DseCluster cluster = DseCluster.builder().addContactPoints(HOSTS.split(","))
+                .withSocketOptions(
+                        new SocketOptions()
+                                .setConnectTimeoutMillis(100)).build();
+
+        DseSession session = cluster.connect("prod");
 
         HelpFormatter formatter = new HelpFormatter();
         formatter.printHelp( "DataLoader", options );
@@ -115,20 +148,24 @@ public class App
         System.out.println("Threads used: " + THREAD_COUNT);
         System.out.println("Period used: " + PERIOD + " days");
         System.out.println("Frequency used: " + FREQUENCY + " seconds");
+        System.out.println("Hosts used: " + HOSTS );
 
         //initialize the blocking queue
         BlockingQueue<List<Metrics>> records = new LinkedBlockingQueue<>();
 
-        ExecutorService executor = Executors.newFixedThreadPool(THREAD_COUNT);
+        ExecutorService executor = Executors.newFixedThreadPool(THREAD_COUNT + 1); // 1 for monitoring thread
 
         Runnable sendTask = () -> {
             System.out.println("Start sending task " + Thread.currentThread().getId());
             try {
-                List<Metrics> record = records.take();
-                //Send to DSE
-                sendMetrics(record);
+                while(true) {
+                    List<Metrics> record = records.take();
+                    //Send to DSE
+                    sendMetrics(record, session);
+                    record = null;
 
-                recordSentCounts.incrementAndGet();
+                    recordSentCounts.incrementAndGet();
+                }
             } catch (InterruptedException e) {
                 System.out.println("");
                 e.printStackTrace();
@@ -141,8 +178,11 @@ public class App
 
         Runnable countingTask = () -> {
             try {
-                Thread.sleep(intervalToReportStatus);
-                System.out.println("Total : " + totalCount + ", finished " + recordSentCounts.get() + ", remains : " + records.size());
+                while(true) {
+                    System.out.println("Added : " + totalCount + ", finished " + recordSentCounts.get() + ", remains : " + records.size());
+                    System.out.println(("HeapSIze " +  Runtime.getRuntime().totalMemory() + " Free: " + Runtime.getRuntime().freeMemory()));
+                    Thread.sleep(intervalToReportStatus);
+                }
             }
             catch (Exception ex){
 
@@ -153,23 +193,81 @@ public class App
         generateMetrics(records);
     }
 
-    private static void sendMetrics(List<Metrics> record){
+    private static void sendMetrics(List<Metrics> record, DseSession session) {
+        BatchStatement bs = new BatchStatement();
+        record.forEach(metrics -> {
+                    String query = "INSERT INTO metrics (user_id, day_part, ts, strap_id, hr, accel_mag, accel, rr, sig_error, hr_confidence, meta)" +
+                            " VALUES ( ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
+                    Statement s = new SimpleStatement(query, metrics.uid, metrics.day_part, metrics.ts, metrics.strap_id, metrics.hr, metrics.accel_mag, Arrays.asList(metrics.accel), Arrays.asList(metrics.rr), metrics.sig_error, metrics.hr_confidence, metrics.meta);
+                    s.setConsistencyLevel(ConsistencyLevel.QUORUM);
+                    ResultSet rc = session.execute(s);
+                    bs.add(s);
+                }
+        );
+        ResultSet rc = session.execute(bs);
 
     }
 
     private static void generateMetrics(BlockingQueue<List<Metrics>> records){
 
+
+        Calendar calendar = Calendar.getInstance();
+        System.out.println(("Started generating data " + calendar.getTime()));
+        Float[] floatNumbers = {0.0f, 0.0f, 0.0f};
+        long startTime = calendar.getTime().getTime();
+        long count = 0;
+        //how many rounds need to insert for all uses
+        // period divide frequency
+        long rounds = (PERIOD * 24 * 60 * 60) / FREQUENCY ;
+        System.out.println((rounds + " rounds"));
+        for(long round = 0; round < rounds; round++) {
+
+            for (int i = 0; i < USER_COUNT; i++) {
+                //insert batch data for each user in turn
+                List<Metrics> data = new ArrayList<>();
+                for (int j = 0; j < ROWS_IN_BATCH; j++) {
+                    Metrics m = new Metrics();
+                    m.uid = USER_TO_START + i;
+                    m.day_part = LocalDate.fromMillisSinceEpoch(startTime + j * 1000); //add one second;
+                    m.ts = new Timestamp(startTime + j * 1000);
+                    m.strap_id = RandomStringUtils.random(10, false, true); //10 digits
+                    m.hr = 100;
+                    m.accel_mag = 0.0f;
+                    m.accel = floatNumbers;
+                    m.rr = floatNumbers;
+                    m.sig_error = 1;
+                    m.hr_confidence = 1;
+                    m.meta = RandomStringUtils.random(512, true, true);
+                    data.add(m);
+
+                    totalCount++;
+                }
+                records.add(data);
+                try {
+                    //Thread.sleep(30);
+                }
+                catch (Exception ex){
+
+                }
+
+            }
+            System.out.println(("Finished " + round+1 + " rounds"));
+        }
+
+        System.out.println(("Finished generating data " + calendar.getTime()));
+        System.out.println("Generated  " + records.size() + " records");
+
     }
 
-    private class Metrics{
+    private static class Metrics{
         public int uid;
-        public Date day_part;
+        public LocalDate day_part;
         public Timestamp ts;
         public String strap_id;
         public int hr;
         public float accel_mag;
-        List<Float> accel_lst;
-        List<Float> rr_lst;
+        Float[] accel;
+        Float[] rr;
         public int sig_error;
         public int hr_confidence;
         public String meta;
