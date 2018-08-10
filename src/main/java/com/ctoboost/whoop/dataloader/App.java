@@ -132,17 +132,11 @@ public class App
         }
 
 
-        DseCluster cluster = DseCluster.builder().addContactPoints(HOSTS.split(","))
-                .withSocketOptions(
-                        new SocketOptions()
-                                .setConnectTimeoutMillis(100)).build();
-
-        DseSession session = cluster.connect("prod");
 
         HelpFormatter formatter = new HelpFormatter();
         formatter.printHelp( "DataLoader", options );
         System.out.println("Start data loader as ");
-        System.out.println("Ros in a batch: " + ROWS_IN_BATCH);
+        System.out.println("Rows in a batch: " + ROWS_IN_BATCH);
         System.out.println("How many users: " + USER_COUNT);
         System.out.println("Start from user: " + USER_TO_START);
         System.out.println("Threads used: " + THREAD_COUNT);
@@ -150,6 +144,13 @@ public class App
         System.out.println("Frequency used: " + FREQUENCY + " seconds");
         System.out.println("Hosts used: " + HOSTS );
 
+
+        DseCluster cluster = DseCluster.builder().addContactPoints(HOSTS.split(","))
+                .withSocketOptions(
+                        new SocketOptions()
+                                .setConnectTimeoutMillis(100)).build();
+
+        DseSession session = cluster.connect("prod");
         //initialize the blocking queue
         BlockingQueue<List<Metrics>> records = new LinkedBlockingQueue<>();
 
@@ -166,8 +167,8 @@ public class App
 
                     recordSentCounts.incrementAndGet();
                 }
-            } catch (InterruptedException e) {
-                System.out.println("");
+            } catch (Exception e) {
+                System.out.println("Exception in sending data " + e.getMessage());
                 e.printStackTrace();
             }
         };
@@ -179,8 +180,7 @@ public class App
         Runnable countingTask = () -> {
             try {
                 while(true) {
-                    System.out.println("Added : " + totalCount + ", finished " + recordSentCounts.get() + ", remains : " + records.size());
-                    System.out.println(("HeapSIze " +  Runtime.getRuntime().totalMemory() + " Free: " + Runtime.getRuntime().freeMemory()));
+                    System.out.println("Added : " + totalCount + ", finished " + recordSentCounts.get() + ", remains : " + records.size() + " running : " + THREAD_COUNT);
                     Thread.sleep(intervalToReportStatus);
                 }
             }
@@ -191,6 +191,7 @@ public class App
         executor.submit(countingTask);
         //Generate records
         generateMetrics(records);
+
     }
 
     private static void sendMetrics(List<Metrics> record, DseSession session) {
@@ -214,14 +215,18 @@ public class App
         Calendar calendar = Calendar.getInstance();
         System.out.println(("Started generating data " + calendar.getTime()));
         Float[] floatNumbers = {0.0f, 0.0f, 0.0f};
-        long startTime = calendar.getTime().getTime();
+        String meta = RandomStringUtils.random(512, true, true);
+        String strapID = RandomStringUtils.random(10, false, true); //10 digits
         long count = 0;
         //how many rounds need to insert for all uses
         // period divide frequency
         long rounds = (PERIOD * 24 * 60 * 60) / FREQUENCY ;
         System.out.println((rounds + " rounds"));
+        long startTime = 0L;
         for(long round = 0; round < rounds; round++) {
-
+            calendar = Calendar.getInstance();
+            startTime = calendar.getTime().getTime();
+            System.out.println(("Start time " + calendar.getTime() + ":" + startTime));
             for (int i = 0; i < USER_COUNT; i++) {
                 //insert batch data for each user in turn
                 List<Metrics> data = new ArrayList<>();
@@ -230,32 +235,32 @@ public class App
                     m.uid = USER_TO_START + i;
                     m.day_part = LocalDate.fromMillisSinceEpoch(startTime + j * 1000); //add one second;
                     m.ts = new Timestamp(startTime + j * 1000);
-                    m.strap_id = RandomStringUtils.random(10, false, true); //10 digits
+                    m.strap_id = strapID;
                     m.hr = 100;
                     m.accel_mag = 0.0f;
                     m.accel = floatNumbers;
                     m.rr = floatNumbers;
                     m.sig_error = 1;
                     m.hr_confidence = 1;
-                    m.meta = RandomStringUtils.random(512, true, true);
+                    m.meta = meta;
                     data.add(m);
 
-                    totalCount++;
                 }
                 records.add(data);
+                totalCount++;
                 try {
-                    //Thread.sleep(30);
+                    Thread.sleep(30);
                 }
                 catch (Exception ex){
 
                 }
 
             }
-            System.out.println(("Finished " + round+1 + " rounds"));
+            System.out.println(("Finished " + (round+1) + " rounds"));
         }
 
         System.out.println(("Finished generating data " + calendar.getTime()));
-        System.out.println("Generated  " + records.size() + " records");
+        System.out.println("Generated  " + totalCount + " records");
 
     }
 
