@@ -31,6 +31,7 @@ public class App
     static int THREAD_COUNT = 10;
     static int PERIOD = 14; //days
     static int FREQUENCY = 60 * 10; // seconds
+    static boolean BATCH = true;
     static String HOSTS = "";
 
     static int intervalToReportStatus = 1000 * 10; //1 minute
@@ -86,6 +87,12 @@ public class App
                 .withDescription( "use value for hosts,  delimited by ," )
                 .create( "H" );
 
+        Option batchOption  = OptionBuilder.withArgName( "batch=value" )
+                .hasArgs(2)
+                .withValueSeparator()
+                .withDescription( "use value for batch mode,  True or False" )
+                .create( "B" );
+
         Options options = new Options();
         // add t option
         options.addOption(rowOption);
@@ -95,6 +102,7 @@ public class App
         options.addOption(periodOption);
         options.addOption(freqencyOption);
         options.addOption(hostOption);
+        options.addOption(batchOption);
 
         try {
             CommandLineParser parser = new DefaultParser();
@@ -126,6 +134,10 @@ public class App
             if (cmd.hasOption("H")){
                 HOSTS = cmd.getOptionProperties("H").getProperty("hosts");
             }
+
+            if (cmd.hasOption("B")){
+                BATCH = Boolean.parseBoolean(cmd.getOptionProperties("B").getProperty("batch"));
+            }
         }
         catch(Exception ex){
             System.out.println("Exception " + ex.getMessage());
@@ -143,12 +155,14 @@ public class App
         System.out.println("Period used: " + PERIOD + " days");
         System.out.println("Frequency used: " + FREQUENCY + " seconds");
         System.out.println("Hosts used: " + HOSTS );
+        System.out.println("Batch mode used: " + BATCH );
 
 
         DseCluster cluster = DseCluster.builder().addContactPoints(HOSTS.split(","))
                 .withSocketOptions(
                         new SocketOptions()
-                                .setConnectTimeoutMillis(100)).build();
+                                .setReadTimeoutMillis(2000)
+                                .setConnectTimeoutMillis(2000)).build();
 
         DseSession session = cluster.connect("prod");
         //initialize the blocking queue
@@ -195,16 +209,28 @@ public class App
     }
 
     private static void sendMetrics(List<Metrics> record, DseSession session) {
-        BatchStatement bs = new BatchStatement();
-        record.forEach(metrics -> {
-                    String query = "INSERT INTO metrics (user_id, day_part, ts, strap_id, hr, accel_mag, accel, rr, sig_error, hr_confidence, meta)" +
-                            " VALUES ( ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
-                    Statement s = new SimpleStatement(query, metrics.uid, metrics.day_part, metrics.ts, metrics.strap_id, metrics.hr, metrics.accel_mag, Arrays.asList(metrics.accel), Arrays.asList(metrics.rr), metrics.sig_error, metrics.hr_confidence, metrics.meta);
-                    s.setConsistencyLevel(ConsistencyLevel.QUORUM);
-                    bs.add(s);
-                }
-        );
-        ResultSet rc = session.execute(bs);
+        if (BATCH) {
+            BatchStatement bs = new BatchStatement();
+            record.forEach(metrics -> {
+                        String query = "INSERT INTO metrics (user_id, day_part, ts, strap_id, hr, accel_mag, accel, rr, sig_error, hr_confidence, meta)" +
+                                " VALUES ( ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
+                        Statement s = new SimpleStatement(query, metrics.uid, metrics.day_part, metrics.ts, metrics.strap_id, metrics.hr, metrics.accel_mag, Arrays.asList(metrics.accel), Arrays.asList(metrics.rr), metrics.sig_error, metrics.hr_confidence, metrics.meta);
+                        s.setConsistencyLevel(ConsistencyLevel.QUORUM);
+                        bs.add(s);
+                    }
+            );
+            session.execute(bs);
+        }
+        else{
+            record.forEach(metrics -> {
+                        String query = "INSERT INTO metrics (user_id, day_part, ts, strap_id, hr, accel_mag, accel, rr, sig_error, hr_confidence, meta)" +
+                                " VALUES ( ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
+                        Statement s = new SimpleStatement(query, metrics.uid, metrics.day_part, metrics.ts, metrics.strap_id, metrics.hr, metrics.accel_mag, Arrays.asList(metrics.accel), Arrays.asList(metrics.rr), metrics.sig_error, metrics.hr_confidence, metrics.meta);
+                        s.setConsistencyLevel(ConsistencyLevel.QUORUM);
+                        session.execute(s);
+                    }
+            );
+        }
 
     }
 
