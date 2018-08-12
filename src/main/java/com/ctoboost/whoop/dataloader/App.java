@@ -31,6 +31,7 @@ public class App
     static int THREAD_COUNT = 10;
     static int PERIOD = 14; //days
     static int FREQUENCY = 60 * 10; // seconds
+    static int TTL = 14; // usually same as PERIOD
     static String HOSTS = "";
 
     static int intervalToReportStatus = 1000 * 10; //1 minute
@@ -86,6 +87,12 @@ public class App
                 .withDescription( "use value for hosts,  delimited by ," )
                 .create( "H" );
 
+        Option ttlOption  = OptionBuilder.withArgName( "expired=value" )
+                .hasArgs(2)
+                .withValueSeparator()
+                .withDescription( "use value for how many days will be expired " )
+                .create( "L" );
+
         Options options = new Options();
         // add t option
         options.addOption(rowOption);
@@ -95,6 +102,7 @@ public class App
         options.addOption(periodOption);
         options.addOption(freqencyOption);
         options.addOption(hostOption);
+        options.addOption(ttlOption);
 
         try {
             CommandLineParser parser = new DefaultParser();
@@ -126,6 +134,13 @@ public class App
             if (cmd.hasOption("H")){
                 HOSTS = cmd.getOptionProperties("H").getProperty("hosts");
             }
+
+            if (cmd.hasOption("L")){
+                TTL = Integer.parseInt(cmd.getOptionProperties("L").getProperty("expired"));
+            }
+            else {
+                TTL = PERIOD;
+            }
         }
         catch(Exception ex){
             System.out.println("Exception " + ex.getMessage());
@@ -150,7 +165,7 @@ public class App
                         new SocketOptions()
                                 .setConnectTimeoutMillis(100)).build();
 
-        DseSession session = cluster.connect("prod");
+        DseSession session = cluster.connect("prod1");
         //initialize the blocking queue
         BlockingQueue<List<Metrics>> records = new LinkedBlockingQueue<>();
 
@@ -213,6 +228,7 @@ public class App
 
         Calendar calendar = Calendar.getInstance();
         System.out.println(("Started generating data " + calendar.getTime()));
+        long endTTLTime = TTL * 24 * 60 * 60;
         Float[] floatNumbers = {0.0f, 0.0f, 0.0f};
         String meta = RandomStringUtils.random(512, true, true);
         String strapID = RandomStringUtils.random(10, false, true); //10 digits
@@ -225,7 +241,6 @@ public class App
         for(long round = 0; round < rounds; round++) {
             calendar = Calendar.getInstance();
             startTime = calendar.getTime().getTime();
-            System.out.println(("Start time " + calendar.getTime() + ":" + startTime));
             for (int i = 0; i < USER_COUNT; i++) {
                 //insert batch data for each user in turn
                 List<Metrics> data = new ArrayList<>();
@@ -242,18 +257,21 @@ public class App
                     m.sig_error = 1;
                     m.hr_confidence = 1;
                     m.meta = meta;
+                    //calculate TTL
+                    m.ttl = endTTLTime - j - round * FREQUENCY;
                     data.add(m);
-
                 }
                 records.add(data);
                 totalCount++;
                 try {
-                    Thread.sleep(30);
+                    if (records.size() > THREAD_COUNT * 100) {
+                        //Give sender thread more time as we produce too many
+                        Thread.sleep(100);
+                    }
                 }
                 catch (Exception ex){
 
                 }
-
             }
             System.out.println(("Finished " + (round+1) + " rounds, TTL " + (endTTLTime - round * FREQUENCY)));
         }
@@ -275,6 +293,7 @@ public class App
         public int sig_error;
         public int hr_confidence;
         public String meta;
+        public long ttl;
     }
 
 }
