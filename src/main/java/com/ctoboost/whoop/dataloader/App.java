@@ -201,7 +201,6 @@ public class App
                             " VALUES ( ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
                     Statement s = new SimpleStatement(query, metrics.uid, metrics.day_part, metrics.ts, metrics.strap_id, metrics.hr, metrics.accel_mag, Arrays.asList(metrics.accel), Arrays.asList(metrics.rr), metrics.sig_error, metrics.hr_confidence, metrics.meta);
                     s.setConsistencyLevel(ConsistencyLevel.QUORUM);
-                    ResultSet rc = session.execute(s);
                     bs.add(s);
                 }
         );
