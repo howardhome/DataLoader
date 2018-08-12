@@ -198,10 +198,9 @@ public class App
         BatchStatement bs = new BatchStatement();
         record.forEach(metrics -> {
                     String query = "INSERT INTO metrics (user_id, day_part, ts, strap_id, hr, accel_mag, accel, rr, sig_error, hr_confidence, meta)" +
-                            " VALUES ( ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
+                            " VALUES ( ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) USING TTL " + metrics.ttl;
                     Statement s = new SimpleStatement(query, metrics.uid, metrics.day_part, metrics.ts, metrics.strap_id, metrics.hr, metrics.accel_mag, Arrays.asList(metrics.accel), Arrays.asList(metrics.rr), metrics.sig_error, metrics.hr_confidence, metrics.meta);
                     s.setConsistencyLevel(ConsistencyLevel.QUORUM);
-                    ResultSet rc = session.execute(s);
                     bs.add(s);
                 }
         );
@@ -256,7 +255,7 @@ public class App
                 }
 
             }
-            System.out.println(("Finished " + (round+1) + " rounds"));
+            System.out.println(("Finished " + (round+1) + " rounds, TTL " + (endTTLTime - round * FREQUENCY)));
         }
 
         System.out.println(("Finished generating data " + calendar.getTime()));
