@@ -11,10 +11,7 @@ package com.ctoboost.whoop.dataloader;
         import java.sql.Timestamp;
 
 
-        import java.util.ArrayList;
-        import java.util.Arrays;
-        import java.util.Calendar;
-        import java.util.List;
+        import java.util.*;
         import java.util.concurrent.*;
         import java.util.concurrent.atomic.AtomicInteger;
 
@@ -171,9 +168,11 @@ public class App
         System.out.println("Frequency used: " + FREQUENCY + " seconds");
         System.out.println("Hosts used: " + HOSTS );
         System.out.println("Batch mode used: " + BATCH );
+        System.out.println("TTL used: " + TTL );
 
-
+        AuthProvider authProvider = new PlainTextAuthProvider("cassandra", "whoop1");
         DseCluster cluster = DseCluster.builder().addContactPoints(HOSTS.split(","))
+                .withAuthProvider(authProvider)
                 .withSocketOptions(
                         new SocketOptions()
                                 .setReadTimeoutMillis(2000)
@@ -202,6 +201,8 @@ public class App
             }
         };
 
+
+
         for(int i = 0; i< THREAD_COUNT; i++){
             executor.submit(sendTask);
         }
@@ -218,9 +219,9 @@ public class App
             }
         };
         executor.submit(countingTask);
+
         //Generate records
         generateMetrics(records);
-
     }
 
     private static void sendMetrics(List<Metrics> record, DseSession session) {
@@ -264,18 +265,21 @@ public class App
         long rounds = (PERIOD * 24 * 60 * 60) / FREQUENCY ;
         System.out.println((rounds + " rounds"));
         long startTime = 0L;
+        calendar = Calendar.getInstance();
+        startTime = calendar.getTime().getTime();
+
         for(long round = 0; round < rounds; round++) {
-            calendar = Calendar.getInstance();
-            startTime = calendar.getTime().getTime();
-            System.out.println(("Start time " + calendar.getTime() + ":" + startTime));
+            long beginTime = startTime + round * FREQUENCY * 1000;
             for (int i = 0; i < USER_COUNT; i++) {
                 //insert batch data for each user in turn
                 List<Metrics> data = new ArrayList<>();
+
                 for (int j = 0; j < ROWS_IN_BATCH; j++) {
+                    long interval = beginTime + j * 1000;
                     Metrics m = new Metrics();
                     m.uid = USER_TO_START + i;
-                    m.day_part = LocalDate.fromMillisSinceEpoch(startTime + j * 1000); //add one second;
-                    m.ts = new Timestamp(startTime + j * 1000);
+                    m.day_part = LocalDate.fromMillisSinceEpoch(interval); //add one second;
+                    m.ts = new Timestamp(interval);
                     m.strap_id = strapID;
                     m.hr = 100;
                     m.accel_mag = 0.0f;
@@ -292,7 +296,7 @@ public class App
                 records.add(data);
                 totalCount++;
                 try {
-                    if (records.size() > THREAD_COUNT * 100) {
+                    if (records.size() > THREAD_COUNT * 50) {
                         //Give sender thread more time as we produce too many
                         Thread.sleep(100);
                     }
@@ -302,6 +306,7 @@ public class App
                 }
 
             }
+            //try{ Thread.sleep(100); } catch (Exception ex){};
             System.out.println(("Finished " + (round+1) + " rounds, TTL " + (endTTLTime - round * FREQUENCY)));
         }
 
