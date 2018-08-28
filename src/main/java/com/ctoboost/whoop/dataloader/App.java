@@ -11,10 +11,7 @@ package com.ctoboost.whoop.dataloader;
         import java.sql.Timestamp;
 
 
-        import java.util.ArrayList;
-        import java.util.Arrays;
-        import java.util.Calendar;
-        import java.util.List;
+        import java.util.*;
         import java.util.concurrent.*;
         import java.util.concurrent.atomic.AtomicInteger;
 
@@ -29,8 +26,9 @@ public class App
     static int USER_COUNT = 10000;
     static int USER_TO_START = 1;
     static int THREAD_COUNT = 10;
-    static int PERIOD = 14; //days
+    static float PERIOD = 14; //days
     static int FREQUENCY = 60 * 10; // seconds
+    static float TTL = 14; // usually same as PERIOD
     static boolean BATCH = true;
     static String HOSTS = "";
 
@@ -93,6 +91,12 @@ public class App
                 .withDescription( "use value for batch mode,  True or False" )
                 .create( "B" );
 
+        Option ttlOption  = OptionBuilder.withArgName( "expired=value" )
+                .hasArgs(2)
+                .withValueSeparator()
+                .withDescription( "use value for how many days will be expired " )
+                .create( "L" );
+
         Options options = new Options();
         // add t option
         options.addOption(rowOption);
@@ -102,6 +106,7 @@ public class App
         options.addOption(periodOption);
         options.addOption(freqencyOption);
         options.addOption(hostOption);
+        options.addOption(ttlOption);
         options.addOption(batchOption);
 
         try {
@@ -124,7 +129,7 @@ public class App
             }
 
             if (cmd.hasOption("P")){
-                PERIOD = Integer.parseInt(cmd.getOptionProperties("P").getProperty("days"));
+                PERIOD = Float.parseFloat(cmd.getOptionProperties("P").getProperty("days"));
             }
 
             if (cmd.hasOption("F")){
@@ -133,6 +138,13 @@ public class App
 
             if (cmd.hasOption("H")){
                 HOSTS = cmd.getOptionProperties("H").getProperty("hosts");
+            }
+
+            if (cmd.hasOption("L")){
+                TTL = Float.parseFloat(cmd.getOptionProperties("L").getProperty("expired"));
+            }
+            else {
+                TTL = PERIOD;
             }
 
             if (cmd.hasOption("B")){
@@ -156,9 +168,11 @@ public class App
         System.out.println("Frequency used: " + FREQUENCY + " seconds");
         System.out.println("Hosts used: " + HOSTS );
         System.out.println("Batch mode used: " + BATCH );
+        System.out.println("TTL used: " + TTL );
 
-
+        AuthProvider authProvider = new PlainTextAuthProvider("cassandra", "whoop1");
         DseCluster cluster = DseCluster.builder().addContactPoints(HOSTS.split(","))
+                .withAuthProvider(authProvider)
                 .withSocketOptions(
                         new SocketOptions()
                                 .setReadTimeoutMillis(2000)
@@ -187,6 +201,8 @@ public class App
             }
         };
 
+
+
         for(int i = 0; i< THREAD_COUNT; i++){
             executor.submit(sendTask);
         }
@@ -203,9 +219,9 @@ public class App
             }
         };
         executor.submit(countingTask);
+
         //Generate records
         generateMetrics(records);
-
     }
 
     private static void sendMetrics(List<Metrics> record, DseSession session) {
@@ -239,27 +255,31 @@ public class App
 
         Calendar calendar = Calendar.getInstance();
         System.out.println(("Started generating data " + calendar.getTime()));
+        long endTTLTime = (long)(TTL * 24 * 60 * 60);
         Float[] floatNumbers = {0.0f, 0.0f, 0.0f};
         String meta = RandomStringUtils.random(512, true, true);
         String strapID = RandomStringUtils.random(10, false, true); //10 digits
         long count = 0;
         //how many rounds need to insert for all uses
         // period divide frequency
-        long rounds = (PERIOD * 24 * 60 * 60) / FREQUENCY ;
+        long rounds = (long)((PERIOD * 24 * 60 * 60) / FREQUENCY );
         System.out.println((rounds + " rounds"));
         long startTime = 0L;
+        calendar = Calendar.getInstance();
+        startTime = calendar.getTime().getTime();
+
         for(long round = 0; round < rounds; round++) {
-            calendar = Calendar.getInstance();
-            startTime = calendar.getTime().getTime();
-            System.out.println(("Start time " + calendar.getTime() + ":" + startTime));
+            long beginTime = startTime + round * FREQUENCY * 1000;
             for (int i = 0; i < USER_COUNT; i++) {
                 //insert batch data for each user in turn
                 List<Metrics> data = new ArrayList<>();
+
                 for (int j = 0; j < ROWS_IN_BATCH; j++) {
+                    long interval = beginTime + j * 1000;
                     Metrics m = new Metrics();
                     m.uid = USER_TO_START + i;
-                    m.day_part = LocalDate.fromMillisSinceEpoch(startTime + j * 1000); //add one second;
-                    m.ts = new Timestamp(startTime + j * 1000);
+                    m.day_part = LocalDate.fromMillisSinceEpoch(interval); //add one second;
+                    m.ts = new Timestamp(interval);
                     m.strap_id = strapID;
                     m.hr = 100;
                     m.accel_mag = 0.0f;
@@ -268,20 +288,26 @@ public class App
                     m.sig_error = 1;
                     m.hr_confidence = 1;
                     m.meta = meta;
+                    //calculate TTL
+                    m.ttl = endTTLTime;
                     data.add(m);
 
                 }
                 records.add(data);
                 totalCount++;
                 try {
-                    Thread.sleep(30);
+                    if (records.size() > THREAD_COUNT * 50) {
+                        //Give sender thread more time as we produce too many
+                        Thread.sleep(100);
+                    }
                 }
                 catch (Exception ex){
 
                 }
 
             }
-            System.out.println(("Finished " + (round+1) + " rounds"));
+            //try{ Thread.sleep(100); } catch (Exception ex){};
+            System.out.println(("Finished " + (round+1) + " rounds, TTL " + (endTTLTime - round * FREQUENCY)));
         }
 
         System.out.println(("Finished generating data " + calendar.getTime()));
@@ -301,6 +327,7 @@ public class App
         public int sig_error;
         public int hr_confidence;
         public String meta;
+        public long ttl;
     }
 
 }
