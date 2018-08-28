@@ -11,6 +11,7 @@ package com.ctoboost.whoop.dataloader;
         import java.sql.Timestamp;
 
 
+        import java.text.SimpleDateFormat;
         import java.util.*;
         import java.util.concurrent.*;
         import java.util.concurrent.atomic.AtomicInteger;
@@ -28,7 +29,7 @@ public class App
     static int THREAD_COUNT = 10;
     static float PERIOD = 14; //days
     static int FREQUENCY = 60 * 10; // seconds
-    static float TTL = 14; // usually same as PERIOD
+    static int TIMERANGE = 4; // 4 hours
     static boolean BATCH = true;
     static String HOSTS = "";
 
@@ -91,10 +92,10 @@ public class App
                 .withDescription( "use value for batch mode,  True or False" )
                 .create( "B" );
 
-        Option ttlOption  = OptionBuilder.withArgName( "expired=value" )
+        Option timeRangeOption  = OptionBuilder.withArgName( "hours=value" )
                 .hasArgs(2)
                 .withValueSeparator()
-                .withDescription( "use value for how many days will be expired " )
+                .withDescription( "use value for time range in hours " )
                 .create( "L" );
 
         Options options = new Options();
@@ -106,7 +107,7 @@ public class App
         options.addOption(periodOption);
         options.addOption(freqencyOption);
         options.addOption(hostOption);
-        options.addOption(ttlOption);
+        options.addOption(timeRangeOption);
         options.addOption(batchOption);
 
         try {
@@ -141,11 +142,9 @@ public class App
             }
 
             if (cmd.hasOption("L")){
-                TTL = Float.parseFloat(cmd.getOptionProperties("L").getProperty("expired"));
+                TIMERANGE = Integer.parseInt(cmd.getOptionProperties("L").getProperty("hours"));
             }
-            else {
-                TTL = PERIOD;
-            }
+
 
             if (cmd.hasOption("B")){
                 BATCH = Boolean.parseBoolean(cmd.getOptionProperties("B").getProperty("batch"));
@@ -168,11 +167,11 @@ public class App
         System.out.println("Frequency used: " + FREQUENCY + " seconds");
         System.out.println("Hosts used: " + HOSTS );
         System.out.println("Batch mode used: " + BATCH );
-        System.out.println("TTL used: " + TTL );
+        System.out.println("Time range used: " + TIMERANGE );
 
         AuthProvider authProvider = new PlainTextAuthProvider("cassandra", "whoop1");
         DseCluster cluster = DseCluster.builder().addContactPoints(HOSTS.split(","))
-                .withAuthProvider(authProvider)
+                //.withAuthProvider(authProvider)
                 .withSocketOptions(
                         new SocketOptions()
                                 .setReadTimeoutMillis(2000)
@@ -228,9 +227,9 @@ public class App
         if (BATCH) {
             BatchStatement bs = new BatchStatement();
             record.forEach(metrics -> {
-                        String query = "INSERT INTO metrics (user_id, day_part, ts, strap_id, hr, accel_mag, accel, rr, sig_error, hr_confidence, meta)" +
-                                " VALUES ( ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
-                        Statement s = new SimpleStatement(query, metrics.uid, metrics.day_part, metrics.ts, metrics.strap_id, metrics.hr, metrics.accel_mag, Arrays.asList(metrics.accel), Arrays.asList(metrics.rr), metrics.sig_error, metrics.hr_confidence, metrics.meta);
+                        String query = "INSERT INTO metrics (user_id, day_part, time_range, ts, strap_id, hr, accel_mag, accel, rr, sig_error, hr_confidence, meta)" +
+                                " VALUES ( ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
+                        Statement s = new SimpleStatement(query, metrics.uid, metrics.day_part, metrics.time_range, metrics.ts, metrics.strap_id, metrics.hr, metrics.accel_mag, Arrays.asList(metrics.accel), Arrays.asList(metrics.rr), metrics.sig_error, metrics.hr_confidence, metrics.meta);
                         s.setConsistencyLevel(ConsistencyLevel.QUORUM);
                         bs.add(s);
                     }
@@ -239,9 +238,9 @@ public class App
         }
         else{
             record.forEach(metrics -> {
-                        String query = "INSERT INTO metrics (user_id, day_part, ts, strap_id, hr, accel_mag, accel, rr, sig_error, hr_confidence, meta)" +
-                                " VALUES ( ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
-                        Statement s = new SimpleStatement(query, metrics.uid, metrics.day_part, metrics.ts, metrics.strap_id, metrics.hr, metrics.accel_mag, Arrays.asList(metrics.accel), Arrays.asList(metrics.rr), metrics.sig_error, metrics.hr_confidence, metrics.meta);
+                        String query = "INSERT INTO metrics (user_id, day_part, time_range, ts, strap_id, hr, accel_mag, accel, rr, sig_error, hr_confidence, meta)" +
+                                " VALUES ( ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
+                        Statement s = new SimpleStatement(query, metrics.uid, metrics.day_part, metrics.time_range,  metrics.ts, metrics.strap_id, metrics.hr, metrics.accel_mag, Arrays.asList(metrics.accel), Arrays.asList(metrics.rr), metrics.sig_error, metrics.hr_confidence, metrics.meta);
                         s.setConsistencyLevel(ConsistencyLevel.QUORUM);
                         session.execute(s);
                     }
@@ -255,7 +254,6 @@ public class App
 
         Calendar calendar = Calendar.getInstance();
         System.out.println(("Started generating data " + calendar.getTime()));
-        long endTTLTime = (long)(TTL * 24 * 60 * 60);
         Float[] floatNumbers = {0.0f, 0.0f, 0.0f};
         String meta = RandomStringUtils.random(512, true, true);
         String strapID = RandomStringUtils.random(10, false, true); //10 digits
@@ -280,6 +278,7 @@ public class App
                     m.uid = USER_TO_START + i;
                     m.day_part = LocalDate.fromMillisSinceEpoch(interval); //add one second;
                     m.ts = new Timestamp(interval);
+                    m.time_range = (byte)(m.ts.getHours() / TIMERANGE);
                     m.strap_id = strapID;
                     m.hr = 100;
                     m.accel_mag = 0.0f;
@@ -288,8 +287,6 @@ public class App
                     m.sig_error = 1;
                     m.hr_confidence = 1;
                     m.meta = meta;
-                    //calculate TTL
-                    m.ttl = endTTLTime;
                     data.add(m);
 
                 }
@@ -307,7 +304,7 @@ public class App
 
             }
             //try{ Thread.sleep(100); } catch (Exception ex){};
-            System.out.println(("Finished " + (round+1) + " rounds, TTL " + (endTTLTime - round * FREQUENCY)));
+            System.out.println(("Finished " + (round+1) + " rounds " + ", " + calendar.getTime()));
         }
 
         System.out.println(("Finished generating data " + calendar.getTime()));
@@ -318,6 +315,7 @@ public class App
     private static class Metrics{
         public int uid;
         public LocalDate day_part;
+        public byte time_range;
         public Timestamp ts;
         public String strap_id;
         public int hr;
