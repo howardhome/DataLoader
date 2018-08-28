@@ -171,7 +171,7 @@ public class App
 
         AuthProvider authProvider = new PlainTextAuthProvider("cassandra", "whoop1");
         DseCluster cluster = DseCluster.builder().addContactPoints(HOSTS.split(","))
-                //.withAuthProvider(authProvider)
+                .withAuthProvider(authProvider)
                 .withSocketOptions(
                         new SocketOptions()
                                 .setReadTimeoutMillis(2000)
@@ -267,6 +267,7 @@ public class App
         startTime = calendar.getTime().getTime();
 
         for(long round = 0; round < rounds; round++) {
+            long start = System.currentTimeMillis();
             long beginTime = startTime + round * FREQUENCY * 1000;
             for (int i = 0; i < USER_COUNT; i++) {
                 //insert batch data for each user in turn
@@ -292,15 +293,20 @@ public class App
                 }
                 records.add(data);
                 totalCount++;
-                try {
-                    if (records.size() > THREAD_COUNT * 50) {
-                        //Give sender thread more time as we produce too many
-                        Thread.sleep(100);
-                    }
-                }
-                catch (Exception ex){
 
+
+            }
+            try {
+                long elapsed = (System.currentTimeMillis() - start);
+                long expected = FREQUENCY * 1000 / 4;
+                // we use 1/4 time to insert data
+                if ( elapsed + 1000 < expected)  {
+                    //Give sender thread more time as we produce too many
+                    System.out.println(("Sleep " + (expected - elapsed)/1000 + " seconds " + ", " + calendar.getTime()));
+                    Thread.sleep(expected - elapsed );
                 }
+            }
+            catch (Exception ex){
 
             }
             //try{ Thread.sleep(100); } catch (Exception ex){};
