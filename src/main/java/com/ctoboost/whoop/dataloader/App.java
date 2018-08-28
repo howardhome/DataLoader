@@ -227,9 +227,9 @@ public class App
         if (BATCH) {
             BatchStatement bs = new BatchStatement();
             record.forEach(metrics -> {
-                        String query = "INSERT INTO metrics (user_id, day_part,  ts, strap_id, hr, accel_mag, accel, rr, sig_error, hr_confidence, meta)" +
-                                " VALUES ( ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
-                        Statement s = new SimpleStatement(query, metrics.uid, metrics.day_part, metrics.ts, metrics.strap_id, metrics.hr, metrics.accel_mag, Arrays.asList(metrics.accel), Arrays.asList(metrics.rr), metrics.sig_error, metrics.hr_confidence, metrics.meta);
+                        String query = "INSERT INTO metrics (user_id, day_part, time_range, ts, strap_id, hr, accel_mag, accel, rr, sig_error, hr_confidence, meta)" +
+                                " VALUES ( ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
+                        Statement s = new SimpleStatement(query, metrics.uid, metrics.day_part, metrics.time_range, metrics.ts, metrics.strap_id, metrics.hr, metrics.accel_mag, Arrays.asList(metrics.accel), Arrays.asList(metrics.rr), metrics.sig_error, metrics.hr_confidence, metrics.meta);
                         s.setConsistencyLevel(ConsistencyLevel.QUORUM);
                         bs.add(s);
                     }
@@ -238,9 +238,9 @@ public class App
         }
         else{
             record.forEach(metrics -> {
-                        String query = "INSERT INTO metrics (user_id, day_part, ts, strap_id, hr, accel_mag, accel, rr, sig_error, hr_confidence, meta)" +
-                                " VALUES ( ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
-                        Statement s = new SimpleStatement(query, metrics.uid, metrics.day_part, metrics.ts, metrics.strap_id, metrics.hr, metrics.accel_mag, Arrays.asList(metrics.accel), Arrays.asList(metrics.rr), metrics.sig_error, metrics.hr_confidence, metrics.meta);
+                        String query = "INSERT INTO metrics (user_id, day_part, time_range, ts, strap_id, hr, accel_mag, accel, rr, sig_error, hr_confidence, meta)" +
+                                " VALUES ( ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
+                        Statement s = new SimpleStatement(query, metrics.uid, metrics.day_part, metrics.time_range,  metrics.ts, metrics.strap_id, metrics.hr, metrics.accel_mag, Arrays.asList(metrics.accel), Arrays.asList(metrics.rr), metrics.sig_error, metrics.hr_confidence, metrics.meta);
                         s.setConsistencyLevel(ConsistencyLevel.QUORUM);
                         session.execute(s);
                     }
