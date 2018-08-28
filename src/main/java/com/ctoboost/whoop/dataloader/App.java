@@ -26,9 +26,9 @@ public class App
     static int USER_COUNT = 10000;
     static int USER_TO_START = 1;
     static int THREAD_COUNT = 10;
-    static int PERIOD = 14; //days
+    static float PERIOD = 14; //days
     static int FREQUENCY = 60 * 10; // seconds
-    static int TTL = 14; // usually same as PERIOD
+    static float TTL = 14; // usually same as PERIOD
     static boolean BATCH = true;
     static String HOSTS = "";
 
@@ -129,7 +129,7 @@ public class App
             }
 
             if (cmd.hasOption("P")){
-                PERIOD = Integer.parseInt(cmd.getOptionProperties("P").getProperty("days"));
+                PERIOD = Float.parseFloat(cmd.getOptionProperties("P").getProperty("days"));
             }
 
             if (cmd.hasOption("F")){
@@ -141,7 +141,7 @@ public class App
             }
 
             if (cmd.hasOption("L")){
-                TTL = Integer.parseInt(cmd.getOptionProperties("L").getProperty("expired"));
+                TTL = Float.parseFloat(cmd.getOptionProperties("L").getProperty("expired"));
             }
             else {
                 TTL = PERIOD;
@@ -229,7 +229,7 @@ public class App
             BatchStatement bs = new BatchStatement();
             record.forEach(metrics -> {
                         String query = "INSERT INTO metrics (user_id, day_part, ts, strap_id, hr, accel_mag, accel, rr, sig_error, hr_confidence, meta)" +
-                                " VALUES ( ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) USING TTL " + metrics.ttl;
+                                " VALUES ( ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
                         Statement s = new SimpleStatement(query, metrics.uid, metrics.day_part, metrics.ts, metrics.strap_id, metrics.hr, metrics.accel_mag, Arrays.asList(metrics.accel), Arrays.asList(metrics.rr), metrics.sig_error, metrics.hr_confidence, metrics.meta);
                         s.setConsistencyLevel(ConsistencyLevel.QUORUM);
                         bs.add(s);
@@ -240,7 +240,7 @@ public class App
         else{
             record.forEach(metrics -> {
                         String query = "INSERT INTO metrics (user_id, day_part, ts, strap_id, hr, accel_mag, accel, rr, sig_error, hr_confidence, meta)" +
-                                " VALUES ( ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) USING TTL " + metrics.ttl;
+                                " VALUES ( ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
                         Statement s = new SimpleStatement(query, metrics.uid, metrics.day_part, metrics.ts, metrics.strap_id, metrics.hr, metrics.accel_mag, Arrays.asList(metrics.accel), Arrays.asList(metrics.rr), metrics.sig_error, metrics.hr_confidence, metrics.meta);
                         s.setConsistencyLevel(ConsistencyLevel.QUORUM);
                         session.execute(s);
@@ -255,14 +255,14 @@ public class App
 
         Calendar calendar = Calendar.getInstance();
         System.out.println(("Started generating data " + calendar.getTime()));
-        long endTTLTime = TTL * 24 * 60 * 60;
+        long endTTLTime = (long)(TTL * 24 * 60 * 60);
         Float[] floatNumbers = {0.0f, 0.0f, 0.0f};
         String meta = RandomStringUtils.random(512, true, true);
         String strapID = RandomStringUtils.random(10, false, true); //10 digits
         long count = 0;
         //how many rounds need to insert for all uses
         // period divide frequency
-        long rounds = (PERIOD * 24 * 60 * 60) / FREQUENCY ;
+        long rounds = (long)((PERIOD * 24 * 60 * 60) / FREQUENCY );
         System.out.println((rounds + " rounds"));
         long startTime = 0L;
         calendar = Calendar.getInstance();
@@ -289,7 +289,7 @@ public class App
                     m.hr_confidence = 1;
                     m.meta = meta;
                     //calculate TTL
-                    m.ttl = endTTLTime - j - round * FREQUENCY;
+                    m.ttl = endTTLTime;
                     data.add(m);
 
                 }
