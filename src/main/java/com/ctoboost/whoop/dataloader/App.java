@@ -303,11 +303,7 @@ public class App
                 records.add(data);
                 totalCount++;
                 sleepCount++;
-                try{ Thread.sleep(1000); } catch (Exception ex){};
-                if ( sleepCount == 200){
-                    try{ Thread.sleep(60); } catch (Exception ex){};
-                    sleepCount = 0;
-                }
+                try{ Thread.sleep(200); } catch (Exception ex){};
             }
 
             /*try {
@@ -325,7 +321,7 @@ public class App
             catch (Exception ex){
 
             }*/
-            try{ Thread.sleep(1000 * 60 * 5); } catch (Exception ex){};
+            try{ Thread.sleep(1000 * 60 * 3); } catch (Exception ex){};
             System.out.println(("Finished " + (round+1) + " rounds " + ", " + calendar.getTime()));
         }
 
