@@ -2,6 +2,8 @@ package com.ctoboost.whoop.dataloader;
 
         import com.datastax.driver.core.*;
 
+        import com.datastax.driver.dse.DseCluster;
+        import com.datastax.driver.dse.DseSession;
         import org.apache.commons.cli.*;
         import org.apache.commons.lang.RandomStringUtils;
 
@@ -9,6 +11,7 @@ package com.ctoboost.whoop.dataloader;
         import java.sql.Timestamp;
 
 
+        import java.text.SimpleDateFormat;
         import java.util.*;
         import java.util.concurrent.*;
         import java.util.concurrent.atomic.AtomicInteger;
@@ -27,7 +30,6 @@ public class App
     static float PERIOD = 14; //days
     static int FREQUENCY = 60 * 10; // seconds
     static int TIMERANGE = 4; // 4 hours
-    static int WAIT = 1;
     static boolean BATCH = true;
     static String HOSTS = "";
 
@@ -93,14 +95,8 @@ public class App
         Option timeRangeOption  = OptionBuilder.withArgName( "hours=value" )
                 .hasArgs(2)
                 .withValueSeparator()
-                .withDescription( "use value for time range of partition key in hours " )
+                .withDescription( "use value for time range in hours " )
                 .create( "L" );
-
-        Option waitOption  = OptionBuilder.withArgName( "wait=value" )
-                .hasArgs(2)
-                .withValueSeparator()
-                .withDescription( "use value for how long to wait in a batch, 1 means  wait 10 minutes, 2 is 5 minutes, 4 is 2.5 minutes " )
-                .create( "W" );
 
         Options options = new Options();
         // add t option
@@ -113,7 +109,6 @@ public class App
         options.addOption(hostOption);
         options.addOption(timeRangeOption);
         options.addOption(batchOption);
-        options.addOption(waitOption);
 
         try {
             CommandLineParser parser = new DefaultParser();
@@ -150,9 +145,6 @@ public class App
                 TIMERANGE = Integer.parseInt(cmd.getOptionProperties("L").getProperty("hours"));
             }
 
-            if (cmd.hasOption("W")){
-                WAIT = Integer.parseInt(cmd.getOptionProperties("W").getProperty("wait"));
-            }
 
             if (cmd.hasOption("B")){
                 BATCH = Boolean.parseBoolean(cmd.getOptionProperties("B").getProperty("batch"));
@@ -176,15 +168,16 @@ public class App
         System.out.println("Hosts used: " + HOSTS );
         System.out.println("Batch mode used: " + BATCH );
         System.out.println("Time range used: " + TIMERANGE );
-        System.out.println("Wait time used: " + FREQUENCY / WAIT  + " seconds.");
 
-        Cluster cluster = Cluster.builder().addContactPoints(HOSTS.split(","))
+        AuthProvider authProvider = new PlainTextAuthProvider("cassandra", "whoop1");
+        DseCluster cluster = DseCluster.builder().addContactPoints(HOSTS.split(","))
+                .withAuthProvider(authProvider)
                 .withSocketOptions(
                         new SocketOptions()
-                                .setReadTimeoutMillis(20000)
-                                .setConnectTimeoutMillis(20000)).build();
+                                .setReadTimeoutMillis(2000)
+                                .setConnectTimeoutMillis(2000)).build();
 
-        Session session = cluster.connect("whoop");
+        DseSession session = cluster.connect("prod");
         //initialize the blocking queue
         BlockingQueue<List<Metrics>> records = new LinkedBlockingQueue<>();
 
@@ -230,15 +223,14 @@ public class App
         generateMetrics(records);
     }
 
-    private static void sendMetrics(List<Metrics> record, Session session) {
+    private static void sendMetrics(List<Metrics> record, DseSession session) {
         if (BATCH) {
             BatchStatement bs = new BatchStatement();
             record.forEach(metrics -> {
-                        String query = "INSERT INTO metrics (user_id, day_part, ts, accel_mag, accel_x, accel_y, accel_z, hr, hr_confidence, rr_0, rr_1, rr_2, rr_3, rr_4, sig_error, strap_id )" +
-                                " VALUES ( ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,?,?,?,?,?)";
-                        Statement s = new SimpleStatement(query, metrics.uid, metrics.day_part, metrics.ts,  metrics.accel_mag, metrics.accel_x,metrics.accel_y,metrics.accel_z, metrics.hr, metrics.hr_confidence,
-                metrics.rr_0,metrics.rr_1,metrics.rr_2,metrics.rr_3,metrics.rr_4, metrics.sig_error,  metrics.strap_id);
-                        s.setConsistencyLevel(ConsistencyLevel.LOCAL_ONE);
+                        String query = "INSERT INTO metrics (user_id, day_part,  ts, strap_id, hr, accel_mag, accel, rr, sig_error, hr_confidence, meta)" +
+                                " VALUES ( ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
+                        Statement s = new SimpleStatement(query, metrics.uid, metrics.day_part, metrics.ts, metrics.strap_id, metrics.hr, metrics.accel_mag, Arrays.asList(metrics.accel), Arrays.asList(metrics.rr), metrics.sig_error, metrics.hr_confidence, metrics.meta);
+                        s.setConsistencyLevel(ConsistencyLevel.QUORUM);
                         bs.add(s);
                     }
             );
@@ -246,10 +238,9 @@ public class App
         }
         else{
             record.forEach(metrics -> {
-                String query = "INSERT INTO metrics (user_id, day_part, ts, accel_mag, accel_x, accel_y, accel_z, hr, hr_confidence, rr_0, rr_1, rr_2, rr_3, rr_4, sig_error, strap_id )" +
-                        " VALUES ( ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,?,?,?,?,?)";
-                Statement s = new SimpleStatement(query, metrics.uid, metrics.day_part, metrics.ts,  metrics.accel_mag, metrics.accel_x,metrics.accel_y,metrics.accel_z, metrics.hr, metrics.hr_confidence,
-                        metrics.rr_0,metrics.rr_1,metrics.rr_2,metrics.rr_3,metrics.rr_4, metrics.sig_error,  metrics.strap_id);
+                        String query = "INSERT INTO metrics (user_id, day_part, ts, strap_id, hr, accel_mag, accel, rr, sig_error, hr_confidence, meta)" +
+                                " VALUES ( ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
+                        Statement s = new SimpleStatement(query, metrics.uid, metrics.day_part, metrics.ts, metrics.strap_id, metrics.hr, metrics.accel_mag, Arrays.asList(metrics.accel), Arrays.asList(metrics.rr), metrics.sig_error, metrics.hr_confidence, metrics.meta);
                         s.setConsistencyLevel(ConsistencyLevel.QUORUM);
                         session.execute(s);
                     }
@@ -263,7 +254,7 @@ public class App
 
         Calendar calendar = Calendar.getInstance();
         System.out.println(("Started generating data " + calendar.getTime()));
-        Float floatNumbers = 0.0f;
+        Float[] floatNumbers = {0.0f, 0.0f, 0.0f};
         String meta = RandomStringUtils.random(512, true, true);
         String strapID = RandomStringUtils.random(10, false, true); //10 digits
         long count = 0;
@@ -278,7 +269,6 @@ public class App
         for(long round = 0; round < rounds; round++) {
             long start = System.currentTimeMillis();
             long beginTime = startTime + round * FREQUENCY * 1000;
-            int sleepCount = 0;
             for (int i = 0; i < USER_COUNT; i++) {
                 //insert batch data for each user in turn
                 List<Metrics> data = new ArrayList<>();
@@ -289,44 +279,37 @@ public class App
                     m.uid = USER_TO_START + i;
                     m.day_part = LocalDate.fromMillisSinceEpoch(interval); //add one second;
                     m.ts = new Timestamp(interval);
+                    m.time_range = (byte)(m.ts.getHours() / TIMERANGE);
                     m.strap_id = strapID;
                     m.hr = 100;
                     m.accel_mag = 0.0f;
-                    m.accel_x = floatNumbers;
-                    m.accel_y = floatNumbers;
-                    m.accel_z = floatNumbers;
-                    m.rr_0 = floatNumbers;
-                    m.rr_1 = floatNumbers;
-                    m.rr_2 = floatNumbers;
-                    m.rr_3 = floatNumbers;
-                    m.rr_4 = floatNumbers;
+                    m.accel = floatNumbers;
+                    m.rr = floatNumbers;
                     m.sig_error = 1;
                     m.hr_confidence = 1;
+                    m.meta = meta;
                     data.add(m);
 
                 }
                 records.add(data);
                 totalCount++;
-                sleepCount++;
-                try{ Thread.sleep(100); } catch (Exception ex){};
-            }
 
-            /*try {
+
+            }
+            try {
                 long elapsed = (System.currentTimeMillis() - start);
-                long expected = FREQUENCY * 1000 / WAIT;
+                long expected = FREQUENCY * 1000 / 4;
                 // we use 1/4 time to insert data
                 if ( elapsed + 1000 < expected)  {
                     //Give sender thread more time as we produce too many
                     System.out.println(("Sleep " + (expected - elapsed)/1000 + " seconds " + ", " + calendar.getTime()));
                     Thread.sleep(expected - elapsed );
                 }
-
-
             }
             catch (Exception ex){
 
-            }*/
-            try{ Thread.sleep(1000 * 60 * 3); } catch (Exception ex){};
+            }
+            //try{ Thread.sleep(100); } catch (Exception ex){};
             System.out.println(("Finished " + (round+1) + " rounds " + ", " + calendar.getTime()));
         }
 
@@ -338,20 +321,16 @@ public class App
     private static class Metrics{
         public int uid;
         public LocalDate day_part;
+        public byte time_range;
         public Timestamp ts;
-        public float accel_mag;
-        public float accel_x;
-        public float accel_y;
-        public float accel_z;
-        public short hr;
-        public int hr_confidence;
-        public float rr_0;
-        public float rr_1;
-        public float rr_2;
-        public float rr_3;
-        public float rr_4;
-        public int sig_error;
         public String strap_id;
+        public int hr;
+        public float accel_mag;
+        Float[] accel;
+        Float[] rr;
+        public int sig_error;
+        public int hr_confidence;
+        public String meta;
         public long ttl;
     }
 
