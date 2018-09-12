@@ -173,15 +173,13 @@ public class App
         System.out.println("Batch mode used: " + BATCH );
         System.out.println("Time range used: " + TIMERANGE );
 
-        AuthProvider authProvider = new PlainTextAuthProvider("cassandra", "whoop1");
         DseCluster cluster = DseCluster.builder().addContactPoints(HOSTS.split(","))
-                .withAuthProvider(authProvider)
                 .withSocketOptions(
                         new SocketOptions()
                                 .setReadTimeoutMillis(2000)
                                 .setConnectTimeoutMillis(2000)).build();
 
-        DseSession session = cluster.connect("prod");
+        DseSession session = cluster.connect("whoop");
         //initialize the blocking queue
         BlockingQueue<List<Metrics>> records = new LinkedBlockingQueue<>();
 
