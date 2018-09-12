@@ -11,6 +11,7 @@ package com.ctoboost.whoop.dataloader;
         import java.sql.Timestamp;
 
 
+        import java.text.SimpleDateFormat;
         import java.util.*;
         import java.util.concurrent.*;
         import java.util.concurrent.atomic.AtomicInteger;
@@ -148,9 +149,6 @@ public class App
                 TIMERANGE = Integer.parseInt(cmd.getOptionProperties("L").getProperty("hours"));
             }
 
-            if (cmd.hasOption("W")){
-                WAIT = Integer.parseInt(cmd.getOptionProperties("W").getProperty("wait"));
-            }
 
             if (cmd.hasOption("B")){
                 BATCH = Boolean.parseBoolean(cmd.getOptionProperties("B").getProperty("batch"));
